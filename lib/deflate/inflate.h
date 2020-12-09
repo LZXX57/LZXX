@@ -22,6 +22,14 @@ ZEXTERN int inflate(z_streamp strm, int flush);
 ZEXTERN int inflateEnd(z_streamp strm);
 
 struct inflate_state {
+    // 保证文件在解压不满一个字节时，或者跨字节边界解压又刚好到达输入文件末尾时能记录信息
+    // copy 存储时的信息记录
+    // 记录当前解压类型 游程编码，lltree，dtree，data_stream 不同解压内容策略不同
+    // 记录各种解压类型的 解码信息
+    // 记录输出数据的缓存及输出数据的当前位置，方便 lz77 跨输入的解码
+    // 记录范式huffman树解码结构 三棵huffman树，动静态lltree，动静态dtree，游程编码tree
+    // 解压文件当前大小
+    // 上级结构体指针用于获取和输出inbuf和outbuf
     // z_streamp strm;             /* pointer back to this zlib stream */
     // inflate_mode mode;          /* current inflate mode */
     // int last;                   /* true if processing last block */
