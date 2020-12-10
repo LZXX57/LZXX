@@ -13,15 +13,6 @@
 extern "C" {
 #endif
 
-/* inflate init z_stream struct construct */
-HEXTERN int inflateInit(h_streamptr strm);
-
-/* inflate decompress */
-HEXTERN int inflate(h_streamptr strm, int flush);
-
-/* inflate end z_stream struct deconstruct */
-HEXTERN int inflateEnd(h_streamptr strm);
-
 struct inflate_state {
     // 保证文件在解压不满一个字节时，或者跨字节边界解压又刚好到达输入文件末尾时能记录信息
     h_streamptr strm; // 指向输入输出流及内存申请函数
@@ -62,6 +53,19 @@ struct inflate_state {
     // 解压文件当前大小 交给上一级 h_streamptr strm; 记录
     
 };
+
+/********************************************/
+/*                API ZONE                  */
+/********************************************/
+
+/* inflate init z_stream struct construct */
+HEXTERN int inflateInit(h_streamptr strm);
+
+/* inflate decompress */
+HEXTERN int inflate(h_streamptr strm, int flush);
+
+/* inflate end z_stream struct deconstruct */
+HEXTERN int inflateEnd(h_streamptr strm);
 
 #ifdef __cplusplus
 }
