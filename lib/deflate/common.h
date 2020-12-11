@@ -14,15 +14,18 @@ extern "C" {
 #  define HEXTERN extern
 #endif
 
-typedef void* voidpf;         /* void * void_ptr */
+#define LOCAL static inline
+#define H_NULL 0
+
+typedef void* voidptr;         /* void * void_ptr */
 typedef unsigned char  Byte;  /* 8 bits */
 typedef unsigned char  uInt8;  /* 8 bits */
 typedef unsigned int   uInt;  /* 16 bits or more */
 typedef unsigned long  uLong; /* 32 bits or more */
 typedef unsigned long long uLong; /* 32 bits or more */
 
-typedef voidpf (*alloc_func) (voidpf opaque, uInt items, uInt size);
-typedef void   (*free_func)  (voidpf opaque, voidpf address);
+typedef voidptr (*alloc_func)(voidptr opaque, uInt items, uInt size);
+typedef void    (*free_func)(voidptr opaque, voidptr address);
 struct internal_state;
 
 typedef struct h_stream_s {
@@ -37,9 +40,9 @@ typedef struct h_stream_s {
     const char *msg;         /* last error message, NULL if no error */
     struct internal_state *state; /* not visible by applications */
 
-    alloc_func zalloc;  /* used to allocate the internal state */
-    free_func  zfree;   /* used to free the internal state */
-    voidpf     opaque;  /* private data object passed to zalloc and zfree */
+    alloc_func halloc;  /* used to allocate the internal state */
+    free_func  hfree;   /* used to free the internal state */
+    voidptr     opaque;  /* private data object passed to zalloc and zfree */
 
     int     data_type;  /* best guess about the data type: binary or text
                            for deflate, or the decoding state for inflate */
@@ -76,6 +79,18 @@ typedef struct h_tree_s{
 } h_tree;
 
 typedef h_tree* h_treePtr;
+
+enum {  // return value
+    H_OK = 0,           // OK
+    H_STREAM_END,       // 
+    H_NEED_DICT,        // 需要更多输入
+    H_ERRNO,            // 通用ERROR
+    H_STREAM_ERROR,     // 数据结构体错误
+    H_DATA_ERROR,       // 数据错误
+    H_MEM_ERROR,        // 内存错误
+    H_BUF_ERROR         // 缓存错误
+}
+
 
 #ifdef __cplusplus
 }

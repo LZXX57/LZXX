@@ -17,7 +17,7 @@ struct inflate_state {
     // 保证文件在解压不满一个字节时，或者跨字节边界解压又刚好到达输入文件末尾时能记录信息
     h_streamptr strm; // 指向输入输出流及内存申请函数
     h_block_type block_type; // block的类型
-    h_state state; // 记录当前解压类型 copy 游程编码，lltree，dtree，data_stream 不同解压内容策略不同
+    h_state hstate; // 记录当前解压类型 copy 游程编码，lltree，dtree，data_stream 不同解压内容策略不同
     
     struct copy_mode{       // copy模式对象属性
         uInt8 block_length;  // 记录 长度 4 Byte读取情况
