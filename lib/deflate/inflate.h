@@ -19,13 +19,13 @@ struct inflate_state {
     h_block_type block_type; // block的类型
     h_state hstate; // 记录当前解压类型 copy 游程编码，lltree，dtree，data_stream 不同解压内容策略不同
     
-    struct copy_mode{       // copy模式对象属性
-        uInt8 block_length;  // 记录 长度 4 Byte读取情况
-        uInt block_size;    // 记录block大小，不会超过65535
-        uInt block_nsize;   // block_size补码
+    struct stored_mode{             // stored模式对象属性
+        uInt8 block_length;         // 记录 长度 4 Byte读取情况
+        uInt block_size;            // 记录block大小，不会超过65535
+        uInt block_nsize;           // block_size补码
         uInt block_decompress_size; // 记录已解压的block大小
     };
-    struct copy_mode copy_state;
+    struct stored_mode stored_state;
 
     struct compress_mode{           // 压缩模式对象属性
         uInt8 lltree_syms;          // 字符和匹配长度sym数

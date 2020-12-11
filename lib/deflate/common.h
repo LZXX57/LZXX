@@ -54,7 +54,7 @@ typedef h_stream* h_streamptr;
 
 typedef enum {
     HEAD = 0,           // 解析 3bit 头
-    COPY,               // copy 模式
+    STORED,             // STORED 模式
     HLIT,               // 字符和匹配长度树sym数 5bits （257-286）
     HDIST,              // 偏移距离树sym数 5bits （1-32）
     HCLEN,              // 游程树sym数 4bits （4-19）
