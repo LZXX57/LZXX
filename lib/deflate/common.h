@@ -42,7 +42,7 @@ typedef struct h_stream_s {
 
     alloc_func halloc;  /* used to allocate the internal state */
     free_func  hfree;   /* used to free the internal state */
-    voidptr     opaque;  /* private data object passed to zalloc and zfree */
+    voidptr     opaque;  /* private data object passed to zalloc and zfree NOT USE*/
 
     int     data_type;  /* best guess about the data type: binary or text
                            for deflate, or the decoding state for inflate */
