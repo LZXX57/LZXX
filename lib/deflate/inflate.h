@@ -35,6 +35,7 @@ struct inflate_state {
 
         uInt code_lens[320];        // 游程编码的编码长度 256+1+30+30
         uInt8 runltree_decode_len;  // 游程树字符sym解码数 need 4 bits
+        uInt8 runcode_count;        // 记录游程编码的解码数
         h_treePtr runltree;         // 游程编码树
 
         h_codePtr llcode;           // 字符和匹配长度解码信息   解码table换为code数组？

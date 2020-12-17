@@ -76,9 +76,9 @@ typedef enum {
 } h_mode;
 
 typedef struct h_tree_s{
-    uInt counts[16];  // 记录各个huffman码长的个数，huffman码长最大不会超过15bits
-    uInt symbols[288]; // 三棵huffman树最大的即为静态 lltree 288个叶子节点（dtree较小，动态树小于等于静态树）
-    uInt max_symbol;   // 记录最大的 symbol 大于最大symbol的symbols索引都无效
+    uInt counts[16];    // 记录各个huffman码长的个数，huffman码长最大不会超过15bits
+    uInt symbols[288];  // 三棵huffman树最大的即为静态 lltree 288个叶子节点（dtree较小，动态树小于等于静态树）
+    uInt max_symbol;    // 记录最大的 symbol 大于最大symbol的symbols索引都无效
 } h_tree;
 
 typedef h_tree* h_treePtr;
@@ -101,7 +101,7 @@ enum {  // return value
     H_OK            = 0,       // OK
     H_STREAM_END    = 1,       // 
     H_NEED_DICT     = 2,       // 需要更多输入
-    H_BLOCK_DONE    = 3,
+//  H_BLOCK_DONE    = 3,
     H_ERRNO         = -1,      // 通用ERROR
     H_STREAM_ERROR  = -2,      // 数据结构体错误
     H_DATA_ERROR    = -3,      // 数据错误

@@ -63,6 +63,75 @@ LOCAL void setFixedTables(struct inflate_state *state){
     return H_False;
 }
 
+// t 的空间必须在外部申请好
+LOCAL int BuildTree(h_treePtr t, uInt *lengths, uInt num)
+{
+    if(t == H_NULL || lengths == H_NULL || num == 0 || num > 288){
+        return H_ERRNO;
+    }
+	unsigned short offs[16] = {0};
+	unsigned int i, num_codes, available;
+
+    // tree init
+    memset((void *)t->counts, 0, 16*sizeof(uInt));
+	// for (i = 0; i < 16; ++i) {
+	// 	t->counts[i] = 0;
+	// }
+	t->max_symbol = num - 1;
+
+	/* Count number of codes for each non-zero length */
+	for (i = 0; i < num; ++i) {
+        if(lengths[i] > 15){
+            return H_DATA_ERROR;
+        }
+		if (lengths[i]) {
+			// t->max_symbol = i;
+			t->counts[lengths[i]]++;
+		}
+	}
+
+	/* Compute offset table for distribution sort */
+	for (available = 1, num_codes = 0, i = 0; i < 16; ++i) {
+		unsigned int used = t->counts[i];
+
+		/* Check length contains no more codes than available */
+		if (used > available) {
+			return H_DATA_ERROR;
+		}
+		available = 2 * (available - used);
+
+		offs[i] = num_codes;
+		num_codes += used;
+	}
+
+	/*
+	 * Check all codes were used, or for the special case of only one
+	 * code that it has length 1
+	 */
+	if ((num_codes > 1 && available > 0)
+	 || (num_codes == 1 && t->counts[1] != 1)) {
+		return H_DATA_ERROR;
+	}
+
+	/* Fill in symbols sorted by code */
+	for (i = 0; i < num; ++i) {
+		if (lengths[i]) {
+			t->symbols[offs[lengths[i]]++] = i;
+		}
+	}
+
+	/*
+	 * For the special case of only one code (which will be 0) add a
+	 * code 1 which results in a symbol that is too large
+	 */
+	if (num_codes == 1) {
+		t->counts[1] = 2;
+		t->symbols[1] = t->max_symbol + 1;
+	}
+
+	return H_OK;
+}
+
 HEXTERN int inflateInit(h_streamptr strm){
     if (strm == H_NULL) return H_STREAM_ERROR;
     strm->msg = H_NULL;  // 错误信息置空
@@ -98,7 +167,8 @@ HEXTERN int inflate(h_streamptr strm, int flush){
     uInt8 *next = H_NULL;
     uInt8 *put = H_NULL;
     struct inflate_state *state = NULL;
-
+    static const uInt run_order[19] = {
+        16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15 };
     if(strm == H_NULL || strm->next_out == H_NULL || strm->state == H_NULL ||
       (strm->next_in == H_NULL && strm->avail_in != 0)){
           return H_STREAM_ERROR;
@@ -159,13 +229,35 @@ HEXTERN int inflate(h_streamptr strm, int flush){
                     left -= stored_len;
                     put += stored_len;
                     state->stored_state.block_size -= stored_len;
+                    break;
                 }
                 state->hmode = DONE;
                 break;
             case HLDCNUM:   // 5 + 5 + 4 bits
                 NEEDBITS(14);
-
+                state->compress_state.lltree_decode_len = BITS(5) + 257;
+                DROPBITS(5);
+                state->compress_state.dtree_decode_len = BITS(5) + 1;
+                DROPBITS(5);
+                state->compress_state.runltree_decode_len = BITS(4) + 4;
+                DROPBITS(4);
+                if(state->compress_state.lltree_decode_len > 286 || 
+                   state->compress_state.dtree_decode_len > 30 ||
+                   state->compress_state.runltree_decode_len > 19){
+                       strm->msg = (char *)"HLDCNUM too many symbols!";
+                       state->hmode = BAD;
+                }
+                state->compress_state.runcode_count = 0;
+                state->hmode = RUNLTREE;
             case RUNLTREE: // 游程码数解码 3bits * HCLEN（4bits）
+                while(state->compress_state.runcode_count < state->compress_state.runltree_decode_len){
+                    NEEDBITS(3);
+                    state->code_lens[run_order[state->compress_state.runcode_count++]] = (uInt)BITS(3);
+                    DROPBITS(3);
+                }
+                while(state->compress_state.runcode_count < 19){
+                    state->code_lens[run_order[state->compress_state.runcode_count++]] = 0;
+                }
 
             case RUNL:
             
@@ -177,9 +269,9 @@ HEXTERN int inflate(h_streamptr strm, int flush){
 
             case DONE:
                 if(state->block_type){
-                    ret = H_OK;
+                    ret = H_STREAM_END;
                 }else{
-                    ret = H_BLOCK_DONE;
+                    ret = H_OK;
                 }
 
             case BAD:
