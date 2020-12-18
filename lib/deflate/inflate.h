@@ -45,6 +45,10 @@ struct inflate_state {
 
         uLong hold;                 // 待解压的数据流的(当前input解码完但是并没有解码到最后，输入为部分压缩文件，因此需要记录未解压的最后剩余的数据，方便和新的输入一起解压)
         uInt bits;                  // hold 中的有效bit
+    
+        uInt8 extra;               //length 或 distance 扩展位个数
+        uInt length;              //literal 或 length 的值
+        uInt dist;                //distance 的值
     };
     struct compress_mode compress_state;
 
@@ -52,6 +56,10 @@ struct inflate_state {
         uInt8 *window;       // 输出缓存区 不小于32K，满足偏移量的最大搜寻距离 （每次扩大为上一次的两倍？？）
         uLong capacity;     // window 实际空间
         uLong size;         // window 已使用空间
+        uInt wsize;         // window 大小
+        uInt wnext;         // 下一次写入时的开始位置
+        uInt whave;         // 已经写入多少数据
+        uInt8 wbits;        // 1 << wbits为窗口大小
     };
     struct window_buf window;
 
