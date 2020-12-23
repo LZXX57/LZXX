@@ -70,10 +70,15 @@ typedef enum {
     LLTREE,             // 解码 字符和匹配长度树
     DTREE,              // 解码偏移量树
     DATA_STREAM,        // 解码压缩数据流    DEXT,// 偏移距离额外bit   LENEXT,// 匹配长度额外bit
+    D_DATA_STREAM,        
     LIT,
+    D_LIT,
     LENEXT,
+    D_LENEXT,
     DIST,
+    D_DIST,
     DEXT,
+    D_DEXT,
     MATCH,
     DONE,
     BAD

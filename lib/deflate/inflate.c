@@ -293,47 +293,57 @@ HEXTERN int inflate(h_streamptr strm, int flush){
                 while(state->compress_state.code_count < 19){
                     state->compress_state.code_lens[run_order[state->compress_state.code_count++]] = 0;
                 }
-                buildTree(&(state->compress_state.runltree), state->compress_state.code_lens, 19);
-                if(-1 == state->compress_state.runltree.max_symbol){
+                ret = buildTree(&(state->compress_state.runltree), state->compress_state.code_lens, 19);
+                if(-1 == state->compress_state.runltree.max_symbol || ret != H_OK){
                     state->hmode = BAD;
                     break;
                 }
                 state->compress_state.code_count = 0;
                 state->compress_state.sym = 19;
-                state->compress_state.dlen = 1;
+                state->compress_state.dlen = 0;
+                state->compress_state.dbase = 0;
+                state->compress_state.doffs = 0;
                 state->hmode = RUNL;
             case RUNL:
                 while(state->compress_state.code_count < (state->compress_state.lltree_decode_len + state->compress_state.dtree_decode_len)){
-
                     switch(state->compress_state.sym){
                         case 16:
-                            if(state->compress_state.code_count = 0){ } // error
+                            if(state->compress_state.code_count == 0){ } // error
                             state->compress_state.sym = state->compress_state.code_lens[state->compress_state.code_count - 1];
+                            NEEDBITS(2);
                             rlength = BITS(2) + 3;
                             DROPBITS(2);
                             break;
                         case 17:
                             state->compress_state.sym = 0;
+                            NEEDBITS(3);
                             rlength = BITS(3) + 3;
                             DROPBITS(3);
                             break;
                         case 18:
                             state->compress_state.sym = 0;
+                            NEEDBITS(7);
                             rlength = BITS(7) + 11;
                             DROPBITS(7);
                             break;
                         case 19:   // 未解压出sym
+                            rlength = 0;
                             break;
                         default :
                             rlength = 1;
                             break;
                     }
-                    if(rlength > state->compress_state.lltree_decode_len + state->compress_state.dtree_decode_len - state->compress_state.code_count){
-                        // error
+                    if(rlength > (state->compress_state.lltree_decode_len + state->compress_state.dtree_decode_len - state->compress_state.code_count)){
+                        state->hmode = BAD;
+                        break;
                     }
-                    while(rlength--){
+                    while(rlength){
                         state->compress_state.code_lens[state->compress_state.code_count++] = state->compress_state.sym;
+                        rlength--;
                     }
+                    if(state->compress_state.code_count == (state->compress_state.lltree_decode_len + state->compress_state.dtree_decode_len)) break;
+                    // if(!rlength) 
+                        state->compress_state.sym = 19;
                     NEEDBITS(15); // 解压出至少一个字符
                     for(;state->compress_state.dlen < bits; state->compress_state.dlen++){
                         state->compress_state.doffs = state->compress_state.doffs << 1 + BITS(1);
@@ -341,20 +351,90 @@ HEXTERN int inflate(h_streamptr strm, int flush){
                             state->compress_state.sym = state->compress_state.runltree.symbols[state->compress_state.dbase + state->compress_state.doffs];
                             state->compress_state.dbase = 0;
                             state->compress_state.doffs = 0;
-                            state->compress_state.dlen = 1;
                             break;
                         }
                         state->compress_state.dbase += state->compress_state.runltree.counts[state->compress_state.dlen];
                         state->compress_state.doffs -= state->compress_state.runltree.counts[state->compress_state.dlen];
                     }
-                    DROPBITS(7);
-                    
+                    DROPBITS(state->compress_state.dlen);
+                    state->compress_state.dlen = 0;
                 }
+                state->hmode = LLTREE;
             
             case LLTREE:
+                ret = buildTree(&(state->compress_state.lltree), state->compress_state.code_lens, state->compress_state.lltree_decode_len);
+                if(ret != H_OK){
+                    state->hmode = BAD;
+                    break;
+                }
+                state->hmode = DTREE;
 
             case DTREE:
-
+                ret = buildTree(&(state->compress_state.dtree), state->compress_state.code_lens + state->compress_state.lltree_decode_len, state->compress_state.dtree_decode_len);
+                if(ret != H_OK){
+                    state->hmode = BAD;
+                    break;
+                }
+                state->hmode = D_DATA_STREAM;
+            case D_DATA_STREAM:  // 动态树的解码流与静态树不一致，分开处理
+                if(have >= 2) NEEDBITS(15);  // 如果数据多则多读取一些
+                else NEEDBITS(1);    // 至少提供 1 bit
+                for(;state->compress_state.dlen < bits; state->compress_state.dlen++){
+                    state->compress_state.doffs = state->compress_state.doffs << 1 + BITS(1);
+                    if(state->compress_state.doffs < state->compress_state.runltree.counts[state->compress_state.dlen]){
+                        state->compress_state.sym = state->compress_state.runltree.symbols[state->compress_state.dbase + state->compress_state.doffs];
+                        state->compress_state.dbase = 0;
+                        state->compress_state.doffs = 0;
+                        break;
+                    }
+                    state->compress_state.dbase += state->compress_state.runltree.counts[state->compress_state.dlen];
+                    state->compress_state.doffs -= state->compress_state.runltree.counts[state->compress_state.dlen];
+                }
+                DROPBITS(state->compress_state.dlen);
+                state->compress_state.dlen = 0;
+                if(state->compress_state.sym < 256){
+                    if (left == 0) {
+                    goto inf_leave;
+                    }
+                    *put++ = (uInt8)state->compress_state.sym;
+                    --left;
+                    break;
+                }else{
+                    if(state->compress_state.sym == 256){
+                        state->hmode = DONE;
+                        break;
+                    }else{
+                        state->hmode = D_LENEXT;
+                    }
+                    
+                }
+            case D_LENEXT:
+                state->compress_state.sym -= 257;
+                NEEDBITS(length_bits[state->compress_state.sym]); //跳出循环。。。。。
+                state->compress_state.length = BITS(length_bits[state->compress_state.sym]) + length_base[state->compress_state.sym];
+                DROPBITS(length_bits[state->compress_state.sym]);
+                state->hmode = D_DIST;
+            case D_DIST:
+                if(have >= 2) NEEDBITS(15);  // 如果数据多则多读取一些
+                else NEEDBITS(1);    // 至少提供 1 bit
+                for(;state->compress_state.dlen < bits; state->compress_state.dlen++){
+                    state->compress_state.doffs = state->compress_state.doffs << 1 + BITS(1);
+                    if(state->compress_state.doffs < state->compress_state.runltree.counts[state->compress_state.dlen]){
+                        state->compress_state.sym = state->compress_state.runltree.symbols[state->compress_state.dbase + state->compress_state.doffs];
+                        state->compress_state.dbase = 0;
+                        state->compress_state.doffs = 0;
+                        state->hmode = D_DEXT;
+                        break;
+                    }
+                    state->compress_state.dbase += state->compress_state.runltree.counts[state->compress_state.dlen];
+                    state->compress_state.doffs -= state->compress_state.runltree.counts[state->compress_state.dlen];
+                }
+                DROPBITS(state->compress_state.dlen);
+                state->compress_state.dlen = 0;
+            case D_DEXT:
+                state->compress_state.dist = BITS(dist_bits[state->compress_state.sym]) + dist_base[state->compress_state.sym];
+                state->hmode = MATCH;
+                break;
             case DATA_STREAM:
                 while (1) {
                     here = state->llcode[BITS(state->lenbits)];
@@ -457,7 +537,12 @@ HEXTERN int inflate(h_streamptr strm, int flush){
                 state->length -= copylen;
 
                 if (state->length == 0) {             // 全部copy完成，才去解析下一个三元组
-                    state->hmode = DATA_STREAM;
+                    if((state->llcode == lenfix) || (state->dcode == distfix)){
+                        state->hmode = DATA_STREAM;
+                    }else{
+                        state->hmode = D_DATA_STREAM;
+                    }
+                    
                 }
                 break;
 
