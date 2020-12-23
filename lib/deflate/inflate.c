@@ -61,85 +61,7 @@
         bits = 0; \
     }while(0)
 
-LOCAL void setFixedTables(struct inflate_state *state){
-    if(state){
-        state->llcode = lenfix;
-        state->lenbits = 9;
-        state->dcode = distfix;
-        state->distbits = 5;
-        return H_True;
-    }
-    return H_False;
-}
 
-// t 的空间必须在外部申请好
-LOCAL int BuildTree(h_treePtr t, uInt *lengths, uInt num)
-{
-    if(t == H_NULL || lengths == H_NULL || num == 0 || num > 288){
-        return H_ERRNO;
-    }
-	unsigned short offs[16] = {0};
-	unsigned int i, num_codes, available;
-
-    // tree init
-    memset((void *)t->counts, 0, 16*sizeof(uInt));
-	// for (i = 0; i < 16; ++i) {
-	// 	t->counts[i] = 0;
-	// }
-	t->max_symbol = num - 1;
-
-	/* Count number of codes for each non-zero length */
-	for (i = 0; i < num; ++i) {
-        if(lengths[i] > 15){
-            return H_DATA_ERROR;
-        }
-		if (lengths[i]) {
-			// t->max_symbol = i;
-			t->counts[lengths[i]]++;
-		}
-	}
-
-	/* Compute offset table for distribution sort */
-	for (available = 1, num_codes = 0, i = 0; i < 16; ++i) {
-		unsigned int used = t->counts[i];
-
-		/* Check length contains no more codes than available */
-		if (used > available) {
-			return H_DATA_ERROR;
-		}
-		available = 2 * (available - used);
-
-		offs[i] = num_codes;
-		num_codes += used;
-	}
-
-	/*
-	 * Check all codes were used, or for the special case of only one
-	 * code that it has length 1
-	 */
-	if ((num_codes > 1 && available > 0)
-	 || (num_codes == 1 && t->counts[1] != 1)) {
-		return H_DATA_ERROR;
-	}
-
-	/* Fill in symbols sorted by code */
-	for (i = 0; i < num; ++i) {
-		if (lengths[i]) {
-			t->symbols[offs[lengths[i]]++] = i;
-		}
-	}
-
-	/*
-	 * For the special case of only one code (which will be 0) add a
-	 * code 1 which results in a symbol that is too large
-	 */
-	if (num_codes == 1) {
-		t->counts[1] = 2;
-		t->symbols[1] = t->max_symbol + 1;
-	}
-
-	return H_OK;
-}
 
 HEXTERN int inflateInit(h_streamptr strm){
     if (strm == H_NULL) return H_STREAM_ERROR;
@@ -160,6 +82,59 @@ HEXTERN int inflateInit(h_streamptr strm){
     state->window = H_NULL;
     state->hmode = HEAD;
     return H_OK;
+}
+
+LOCAL void setFixedTables(struct inflate_state *state){
+    if(state){
+        state->llcode = lenfix;
+        state->lenbits = 9;
+        state->dcode = distfix;
+        state->distbits = 5;
+        return H_True;
+    }
+    return H_False;
+}
+
+// t 的空间必须在外部申请好
+LOCAL int buildTree(h_treePtr t, uInt *lengths, uInt num)
+{
+    if(t == H_NULL || lengths == H_NULL || num == 0 || num > 288){
+        return H_ERRNO;
+    }
+	unsigned short offs[16] = {0};
+	unsigned int i, num_codes, available;
+
+    // tree 初始化
+    memset((void *)t->counts, 0, 16*sizeof(uInt));
+	t->max_symbol = -1;
+
+	/* 记录每一种Huffman码长度的个数 */
+	for (i = 0; i < num; ++i) {
+        if(lengths[i] > 15){            // huffman编码长度不应超过 15
+            return H_DATA_ERROR;
+        }
+		if (lengths[i]) {
+			t->max_symbol = i;          // 设置Huffman编码长度非 0 的最大 symbol
+			t->counts[lengths[i]]++;
+		}
+	}
+
+	/* 计算每一种Huffman码长度的起始下标 霍式Huffman树 */
+	for (available = 1, num_codes = 0, i = 0; i < 16; ++i) {
+		unsigned int used = t->counts[i];
+
+		offs[i] = num_codes;
+		num_codes += used;
+	}
+
+	/* 记录每一个symbol对应的数组下标 */
+	for (i = 0; i < num; ++i) {
+		if (lengths[i]) {
+			t->symbols[offs[lengths[i]]++] = i;
+		}
+	}
+
+	return H_OK;
 }
 
 LOCAL uInt updatewindow(h_streamptr strm, const uInt8 *start, uInt len)
@@ -200,11 +175,17 @@ LOCAL uInt updatewindow(h_streamptr strm, const uInt8 *start, uInt len)
     return 0;
 }
 
+LOCAL int docodeOneBit(struct inflate_state state){
+    
+    return 19; // sym 解码未完成
+}
+
 HEXTERN int inflate(h_streamptr strm, int flush){
     /* 
         首先提需求，即需要多少个 bit，对 hold 中的有效 bit 进行补充。
         解析有效 bit 。
     */
+    uInt rlength = 0;
     uInt ret = H_OK;
     uLong have = 0;
     uLong left = 0;
@@ -213,7 +194,7 @@ HEXTERN int inflate(h_streamptr strm, int flush){
     uInt stored_len = 0;
     uInt8 *next = H_NULL;
     uInt8 *put = H_NULL;
-    struct inflate_state *state = NULL;
+    struct inflate_state *state = H_NULL;
     static const uInt run_order[19] = {
         16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15 };
     h_code here;
@@ -234,7 +215,7 @@ HEXTERN int inflate(h_streamptr strm, int flush){
     have = strm->avail_in;
     put = strm->next_out;
     left = strm->avail_out;
-    out = left;
+    out = strm->avail_out;
 
     while(1){
         switch(state->hmode){
@@ -301,19 +282,74 @@ HEXTERN int inflate(h_streamptr strm, int flush){
                        strm->msg = (char *)"HLDCNUM too many symbols!";
                        state->hmode = BAD;
                 }
-                state->compress_state.runcode_count = 0;
+                state->compress_state.code_count = 0;
                 state->hmode = RUNLTREE;
             case RUNLTREE: // 游程码数解码 3bits * HCLEN（4bits）
-                while(state->compress_state.runcode_count < state->compress_state.runltree_decode_len){
+                while(state->compress_state.code_count < state->compress_state.runltree_decode_len){
                     NEEDBITS(3);
-                    state->code_lens[run_order[state->compress_state.runcode_count++]] = (uInt)BITS(3);
+                    state->compress_state.code_lens[run_order[state->compress_state.code_count++]] = (uInt)BITS(3);
                     DROPBITS(3);
                 }
-                while(state->compress_state.runcode_count < 19){
-                    state->code_lens[run_order[state->compress_state.runcode_count++]] = 0;
+                while(state->compress_state.code_count < 19){
+                    state->compress_state.code_lens[run_order[state->compress_state.code_count++]] = 0;
                 }
-
+                buildTree(&(state->compress_state.runltree), state->compress_state.code_lens, 19);
+                if(-1 == state->compress_state.runltree.max_symbol){
+                    state->hmode = BAD;
+                    break;
+                }
+                state->compress_state.code_count = 0;
+                state->compress_state.sym = 19;
+                state->compress_state.dlen = 1;
+                state->hmode = RUNL;
             case RUNL:
+                while(state->compress_state.code_count < (state->compress_state.lltree_decode_len + state->compress_state.dtree_decode_len)){
+
+                    switch(state->compress_state.sym){
+                        case 16:
+                            if(state->compress_state.code_count = 0){ } // error
+                            state->compress_state.sym = state->compress_state.code_lens[state->compress_state.code_count - 1];
+                            rlength = BITS(2) + 3;
+                            DROPBITS(2);
+                            break;
+                        case 17:
+                            state->compress_state.sym = 0;
+                            rlength = BITS(3) + 3;
+                            DROPBITS(3);
+                            break;
+                        case 18:
+                            state->compress_state.sym = 0;
+                            rlength = BITS(7) + 11;
+                            DROPBITS(7);
+                            break;
+                        case 19:   // 未解压出sym
+                            break;
+                        default :
+                            rlength = 1;
+                            break;
+                    }
+                    if(rlength > state->compress_state.lltree_decode_len + state->compress_state.dtree_decode_len - state->compress_state.code_count){
+                        // error
+                    }
+                    while(rlength--){
+                        state->compress_state.code_lens[state->compress_state.code_count++] = state->compress_state.sym;
+                    }
+                    NEEDBITS(15); // 解压出至少一个字符
+                    for(;state->compress_state.dlen < bits; state->compress_state.dlen++){
+                        state->compress_state.doffs = state->compress_state.doffs << 1 + BITS(1);
+                        if(state->compress_state.doffs < state->compress_state.runltree.counts[state->compress_state.dlen]){
+                            state->compress_state.sym = state->compress_state.runltree.symbols[state->compress_state.dbase + state->compress_state.doffs];
+                            state->compress_state.dbase = 0;
+                            state->compress_state.doffs = 0;
+                            state->compress_state.dlen = 1;
+                            break;
+                        }
+                        state->compress_state.dbase += state->compress_state.runltree.counts[state->compress_state.dlen];
+                        state->compress_state.doffs -= state->compress_state.runltree.counts[state->compress_state.dlen];
+                    }
+                    DROPBITS(7);
+                    
+                }
             
             case LLTREE:
 
@@ -330,8 +366,8 @@ HEXTERN int inflate(h_streamptr strm, int flush){
                 DROPBITS(here.bits);
                 state->length = here.val;
                 if (here.op & 0x10) {
-                    state->extra = here.op & 0x0F;
-                    if (state->extra) {
+                    state->extrabits = here.op & 0x0F;
+                    if (state->extrabits) {
                         state->hmode = LENEXT;
                     } else {
                         state->hmode = DIST;
@@ -357,9 +393,9 @@ HEXTERN int inflate(h_streamptr strm, int flush){
                 break;
 
             case LENEXT:
-                NEEDBITS(state->extra);
-                state->length += BITS(state->extra);
-                DROPBITS(state->extra);
+                NEEDBITS(state->extrabits);
+                state->length += BITS(state->extrabits);
+                DROPBITS(state->extrabits);
                 state->hmode = DIST;
 
             case DIST:
@@ -372,17 +408,17 @@ HEXTERN int inflate(h_streamptr strm, int flush){
                 }
                 DROPBITS(here.bits);
                 state->dist = here.val;
-                state->extra = here.op & 0x0F;
-                if (!state->extra) {
+                state->extrabits = here.op & 0x0F;
+                if (!state->extrabits) {
                     state->hmode = MATCH;
                     break;
                 }
                 state->hmode = DEXT;
 
             case DEXT:
-                NEEDBITS(state->extra);
-                state->dist += BITS(state->extra);
-                DROPBITS(state->extra);
+                NEEDBITS(state->extrabits);
+                state->dist += BITS(state->extrabits);
+                DROPBITS(state->extrabits);
                 state->hmode = MATCH;
 
             case MATCH:
