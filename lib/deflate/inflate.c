@@ -549,12 +549,15 @@ HEXTERN int inflate(h_streamptr strm, int flush){
             case DONE:
                 if(state->block_type){
                     ret = H_STREAM_END;
+                    goto inf_leave;
                 }else{
                     ret = H_OK;
+                    goto inf_leave;
                 }
 
             case BAD:
                 ret = H_ERRNO;
+                goto inf_leave;
 
         }
     }
@@ -574,7 +577,7 @@ HEXTERN int inflateEnd(h_streamptr strm){
     if(strm == H_NULL) return H_STREAM_ERROR;
     struct inflate_state *state = (struct inflate_state *)strm->state;
     if(state == H_NULL) return H_STREAM_ERROR;
-    if (state->window != H_NULL) strm->hfree((strm)->opaque, (state->window).window);
+    if (state->window_buf.window != H_NULL) strm->hfree((strm)->opaque, state->window_buf.window);
     strm->hfree((strm)->opaque, strm->state);
     strm->state = H_NULL;
     return H_OK;
