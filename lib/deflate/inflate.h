@@ -61,7 +61,7 @@ struct inflate_state {
     };
     struct compress_mode compress_state;
 
-    struct window_buf{
+    struct window_buff{
         uInt8 *window;      // 输出缓存区 不小于32K，满足偏移量的最大搜寻距离 （每次扩大为上一次的两倍？？）
         uLong capacity;     // window 实际空间
         uLong size;         // window 已使用空间
@@ -70,7 +70,7 @@ struct inflate_state {
         uInt whave;         // 已经写入多少数据
         uInt8 wbits;        // 1 << wbits为窗口大小
     };
-    struct window_buf window_buf;
+    struct window_buff window_buf;
     
 };
 

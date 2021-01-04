@@ -30,8 +30,8 @@
 // 将解压临时值存储到结构体中等待数据输入或者...
 #define RESTORE() \
     do{ \
-        state->hold = hold; \
-        state->bits = bits; \
+        state->compress_state.hold = hold; \
+        state->compress_state.bits = bits; \
         strm->next_out = put; \
         strm->avail_out = left; \
         strm->next_in = next; \
@@ -39,7 +39,7 @@
     }while(0)
 
 // 提取 hold 低 n bit值
-#define BITS(n) ((uInt)(hold & ((1U << (uInt)(n) - 1))))  
+#define BITS(n) (uInt)(hold & ((1U << (uInt)(n)) - 1))
 
 // 移除 hold 中 n bits
 #define DROPBITS(n) \
@@ -79,17 +79,18 @@ HEXTERN int inflateInit(h_streamptr strm){
     memset((voidptr)state, 0, sizeof(struct inflate_state));
     strm->state = (struct internal_state *)state;
     state->strm = strm;
-    state->window = H_NULL;
     state->hmode = HEAD;
+    state->window_buf.window = H_NULL;
+    state->window_buf.wbits = 15;  // 设置输出窗口32Kb
     return H_OK;
 }
 
 LOCAL void setFixedTables(struct inflate_state *state){
     if(state){
-        state->llcode = lenfix;
-        state->lenbits = 9;
-        state->dcode = distfix;
-        state->distbits = 5;
+        state->compress_state.llcode = lenfix;
+        state->compress_state.lenbits = 9;
+        state->compress_state.dcode = distfix;
+        state->compress_state.distbits = 5;
         return H_True;
     }
     return H_False;
@@ -140,35 +141,35 @@ LOCAL int buildTree(h_treePtr t, uInt *lengths, uInt num)
 LOCAL uInt updatewindow(h_streamptr strm, const uInt8 *start, uInt len)
 {
     struct inflate_state *state = strm->state;
-    if (state->window == H_NULL) {
-        state->window = (uInt8*)strm->halloc(strm->opaque, 1 << state->wbits, sizeof(uInt8));
-        if (state->window == H_NULL) {
+    if (state->window_buf.window == H_NULL) {
+        state->window_buf.window = (uInt8 *)strm->halloc(strm->opaque, 1 << state->window_buf.wbits, sizeof(uInt8));
+        if (state->window_buf.window == H_NULL) {
             return 1;
         }
-        state->wsize = 1 << state->wbits;
-        state->whave = 0;
-        state->wnext = 0;
+        state->window_buf.wsize = 1 << state->window_buf.wbits;
+        state->window_buf.whave = 0;
+        state->window_buf.wnext = 0;
     }
 
     /* len超过窗口大小，copy后state->wsize大小的数据 */
-    if (len >= state->wsize) {
-        hmemcpy(state->window, start + len -  state->wsize, state->wsize);
-        state->wnext = 0;
-        state->whave = state->wsize;
+    if (len >= state->window_buf.wsize) {
+        hmemcpy(state->window_buf.window, start + len -  state->window_buf.wsize, state->window_buf.wsize);
+        state->window_buf.wnext = 0;
+        state->window_buf.whave = state->window_buf.wsize;
     } else {
-        uInt dist = state->wsize - state->wnext;
+        uInt dist = state->window_buf.wsize - state->window_buf.wnext;
         if (dist > len) {          //没有超出尾部
-            hmemcpy(state->window + state->wnext, start, len);
-            state->wnext += len;
-            state->whave += len; 
-            if (state->whave > state->wsize) {
-                state->whave = state->wsize;
+            hmemcpy(state->window_buf.window + state->window_buf.wnext, start, len);
+            state->window_buf.wnext += len;
+            state->window_buf.whave += len; 
+            if (state->window_buf.whave > state->window_buf.wsize) {
+                state->window_buf.whave = state->window_buf.wsize;
             }
         } else {                   //超出尾部 或 刚好到达尾部
-            hmemcpy(state->window + state->wnext, start, dist);
-            hmemcpy(state->window, start + dist, len - dist);
-            state->wnext = len - dist;
-            state->whave = state->wsize;
+            hmemcpy(state->window_buf.window + state->window_buf.wnext, start, dist);
+            hmemcpy(state->window_buf.window, start + dist, len - dist);
+            state->window_buf.wnext = len - dist;
+            state->window_buf.whave = state->wsize;
         }
     }
 
@@ -208,8 +209,8 @@ HEXTERN int inflate(h_streamptr strm, int flush){
       }
     state = (struct inflate_state *)strm->state;
     if(state->hmode != HEAD){
-        hold = state->hold;
-        bits = state->bits;
+        hold = state->compress_state.hold;
+        bits = state->compress_state.bits;
     }
     next = strm->next_in;
     have = strm->avail_in;
@@ -437,24 +438,25 @@ HEXTERN int inflate(h_streamptr strm, int flush){
                 break;
             case DATA_STREAM:
                 while (1) {
-                    here = state->llcode[BITS(state->lenbits)];
+                    int tmp = BITS(state->compress_state.lenbits);
+                    here = (state->compress_state.llcode)[tmp];
                     if ((uInt)here.bits <= bits) {
                         break;
                     }
                     PULLBYTE();
                 }
                 DROPBITS(here.bits);
-                state->length = here.val;
+                state->compress_state.length = here.val;
                 if (here.op & 0x10) {
-                    state->extrabits = here.op & 0x0F;
-                    if (state->extrabits) {
+                    state->compress_state.extrabits = here.op & 0x0F;
+                    if (state->compress_state.extrabits) {
                         state->hmode = LENEXT;
                     } else {
                         state->hmode = DIST;
                     }
                     break;              
                 } else if (here.op == 0x60) {
-                    state->hmode = HEAD;
+                    state->hmode = DONE;
                     break;
                 } else if (here.op != 0) {
                     strm->msg = "invalid literal/length code";
@@ -467,38 +469,38 @@ HEXTERN int inflate(h_streamptr strm, int flush){
                 if (left == 0) {
                     goto inf_leave;
                 }
-                *put++ = (uInt8)state->length;
+                *put++ = (uInt8)state->compress_state.length;
                 --left;
                 state->hmode = DATA_STREAM;
                 break;
 
             case LENEXT:
-                NEEDBITS(state->extrabits);
-                state->length += BITS(state->extrabits);
-                DROPBITS(state->extrabits);
+                NEEDBITS(state->compress_state.extrabits);
+                state->compress_state.length += BITS(state->compress_state.extrabits);
+                DROPBITS(state->compress_state.extrabits);
                 state->hmode = DIST;
 
             case DIST:
                 while (1) {
-                    here = state->dcode[BITS(state->distbits)];
+                    here = state->compress_state.dcode[BITS(state->compress_state.distbits)];
                     if ((uInt)here.bits <= bits) {
                         break;
                     }
                     PULLBYTE();
                 }
                 DROPBITS(here.bits);
-                state->dist = here.val;
-                state->extrabits = here.op & 0x0F;
-                if (!state->extrabits) {
+                state->compress_state.dist = here.val;
+                state->compress_state.extrabits = here.op & 0x0F;
+                if (!state->compress_state.extrabits) {
                     state->hmode = MATCH;
                     break;
                 }
                 state->hmode = DEXT;
 
             case DEXT:
-                NEEDBITS(state->extrabits);
-                state->dist += BITS(state->extrabits);
-                DROPBITS(state->extrabits);
+                NEEDBITS(state->compress_state.extrabits);
+                state->compress_state.dist += BITS(state->compress_state.extrabits);
+                DROPBITS(state->compress_state.extrabits);
                 state->hmode = MATCH;
 
             case MATCH:
@@ -506,38 +508,40 @@ HEXTERN int inflate(h_streamptr strm, int flush){
                     goto inf_leave;
                 }
                 copylen = strm->avail_out - left;
-                if (state->dist > copylen) {           // copy起始点超出outbuffer起始点,需要从滑动窗口中取数据
-                    copylen = state->dist - copylen;
-                    if (copylen > state->whave) {      // copy起始点超出滑动窗口，直接报错
+                if (state->compress_state.dist > copylen) {           // copy起始点超出outbuffer起始点,需要从滑动窗口中取数据
+                    copylen = state->compress_state.dist - copylen;
+                    if (copylen > state->window_buf.whave) {      // copy起始点超出滑动窗口，直接报错
                         strm->msg = (char*)"invalid distance too far back";
                         state->hmode = BAD;
                         break;
                     }
-                    if (copylen > state->wnext) {      // copy起始点超过当前循环的起始位置,需要从上一次循环的窗口中获取数据
-                        copylen -= state->wnext;
-                        copyfrom = state->window + (state->wsize - copylen);
+                    if (copylen > state->window_buf.wnext) {      // copy起始点超过当前循环的起始位置,需要从上一次循环的窗口中获取数据
+                        copylen -= state->window_buf.wnext;
+                        copyfrom = state->window_buf.window + (state->window_buf.wsize - copylen);
                     } else {                           // copy起始点在当前循环内
-                        copyfrom = state->window + (state->wnext - copylen);
+                        copyfrom = state->window_buf.window + (state->window_buf.wnext - copylen);
                     }
-                    if (copylen > state->length) {     // 没有横跨两次滑动窗口 或 没有横跨滑动窗口和outbuffer
-                        copylen = state->length;
+                    if (copylen > state->compress_state.length) {     // 没有横跨两次滑动窗口 或 没有横跨滑动窗口和outbuffer
+                        copylen = state->compress_state.length;
                     }
                 } else {                               // copy起始点在outbuffer上
-                    copyfrom = put - state->dist;
-                    copylen = state->length;
+                    copyfrom = put - state->compress_state.dist;
+                    copylen = state->compress_state.length;
                 }
                 if (copylen > left) {                  // 超出outbuffer剩余大小，先只copy剩余部分大小的数据
                     copylen = left;
                 }
                 do {
                     *put++ = *copyfrom++;
+                    left--;
+                    state->compress_state.length--;
                 } while (--copylen);
 
-                left -= copylen;                      // 减去已经copy的长度，dist不用变，因为更新滑动窗口时，窗口前移copylen，刚好抵消刚刚消耗的距离。
-                state->length -= copylen;
+                // left -= copylen;                      // 减去已经copy的长度，dist不用变，因为更新滑动窗口时，窗口前移copylen，刚好抵消刚刚消耗的距离。
+                // state->compress_state.length -= copylen;
 
-                if (state->length == 0) {             // 全部copy完成，才去解析下一个三元组
-                    if((state->llcode == lenfix) || (state->dcode == distfix)){
+                if (state->compress_state.length == 0) {             // 全部copy完成，才去解析下一个三元组
+                    if((state->compress_state.llcode == lenfix) && (state->compress_state.dcode == distfix)){
                         state->hmode = DATA_STREAM;
                     }else{
                         state->hmode = D_DATA_STREAM;
@@ -565,7 +569,7 @@ inf_leave:
     // 记录holded bits 输出返回状态
    RESTORE();
    if (out != strm->avail_out) {
-       if (updatewindow(strm, out, out - strm->avail_out)) {
+       if (updatewindow(strm, strm->next_out - (out - strm->avail_out), out - strm->avail_out)) {
            return H_MEM_ERROR;
        }
    }
